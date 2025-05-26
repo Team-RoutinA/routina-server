@@ -199,7 +199,8 @@ def get_alarms(user_id: str, db: Session = Depends(get_db)):
         {
             "alarm_id": a.alarm_id,
             "time": a.time,
-            "status": a.status
+            "status": a.status,
+            "repeat_days": [int(x) for x in a.repeat_days.split(",") if x.strip()]
         } for a in alarms
     ]
 
@@ -258,6 +259,7 @@ def weekly_feedback(user_id: str, db: Session = Depends(get_db)):
     return [
         {"week": r[0], "done": r[1], "completed": int(r[2] or 0), "rate": float(r[3] or 0)} for r in results
     ]
+# 알람 수정 + 반복 요일도 함께 수정
 @app.put("/alarms/{alarm_id}")
 def update_alarm(alarm_id: str, update: schemas.AlarmUpdate, db: Session = Depends(get_db)):
     alarm = db.query(models.Alarm).filter(models.Alarm.alarm_id == alarm_id).first()
@@ -272,7 +274,9 @@ def update_alarm(alarm_id: str, update: schemas.AlarmUpdate, db: Session = Depen
     if update.repeat_days is not None:
         alarm.repeat_days = ','.join(map(str, update.repeat_days))
     db.commit()
-    return {"message": "Alarm updated", "alarm_id": alarm_id}
+    return {"message": "Alarm updated", "alarm_id": alarm_id, "repeat_days": update.repeat_days}
+
+# 알람 실행 결과 루틴별 업데이트 (PUT)
 @app.put("/alarm-executions/{exec_id}")
 def update_alarm_execution(exec_id: str, data: dict, db: Session = Depends(get_db)):
     log = db.query(models.AlarmExecutionLog).filter(models.AlarmExecutionLog.exec_id == exec_id).first()
