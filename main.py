@@ -39,31 +39,26 @@ def create_alarm(alarm: schemas.AlarmCreate, db: Session = Depends(get_db)):
         user_id=alarm.user_id,
         time=alarm.time,
         status=alarm.status,
-        sound_volume=alarm.sound_volume
+        sound_volume=alarm.sound_volume,
+        repeat_days=','.join(map(str, alarm.repeat_days or []))
     )
     db.add(db_alarm)
     db.commit()
 
-    routine_objs = []
     for r in alarm.routines:
-        alr = models.AlarmRoutine(
+        db.add(models.AlarmRoutine(
             alr_id=str(uuid.uuid4()),
             alarm_id=alarm_id,
             routine_id=r.routine_id,
             order=r.order
-        )
-        db.add(alr)
-        routine = db.query(models.Routine).filter(models.Routine.routine_id == r.routine_id).first()
-        if routine:
-            routine_objs.append(routine)
-
+        ))
     db.commit()
-
     return {
         "alarm_id": alarm_id,
         "time": db_alarm.time,
         "status": db_alarm.status,
-        "routines": routine_objs
+        "routines": alarm.routines,
+        "repeat_days": alarm.repeat_days
     }
 
 @app.post("/alarms/{alarm_id}/repeat-days", response_model=List[schemas.AlarmRepeatDayOut])
@@ -263,3 +258,52 @@ def weekly_feedback(user_id: str, db: Session = Depends(get_db)):
     return [
         {"week": r[0], "done": r[1], "completed": int(r[2] or 0), "rate": float(r[3] or 0)} for r in results
     ]
+@app.put("/alarms/{alarm_id}")
+def update_alarm(alarm_id: str, update: schemas.AlarmUpdate, db: Session = Depends(get_db)):
+    alarm = db.query(models.Alarm).filter(models.Alarm.alarm_id == alarm_id).first()
+    if not alarm:
+        raise HTTPException(status_code=404, detail="Alarm not found")
+    if update.time:
+        alarm.time = update.time
+    if update.status:
+        alarm.status = update.status
+    if update.sound_volume is not None:
+        alarm.sound_volume = update.sound_volume
+    if update.repeat_days is not None:
+        alarm.repeat_days = ','.join(map(str, update.repeat_days))
+    db.commit()
+    return {"message": "Alarm updated", "alarm_id": alarm_id}
+@app.put("/alarm-executions/{exec_id}")
+def update_alarm_execution(exec_id: str, data: dict, db: Session = Depends(get_db)):
+    log = db.query(models.AlarmExecutionLog).filter(models.AlarmExecutionLog.exec_id == exec_id).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="Execution not found")
+    routines = data.get("routines", [])
+    completed = 0
+    for r in routines:
+        axr = db.query(models.AlarmExecutionRoutine).filter(
+            models.AlarmExecutionRoutine.exec_id == exec_id,
+            models.AlarmExecutionRoutine.routine_id == r["routine_id"]
+        ).first()
+        if axr:
+            axr.completed = int(r["completed"])
+            axr.actual_value = r.get("actual_value")
+            axr.completed_ts = r.get("completed_ts")
+            axr.abort_ts = r.get("abort_ts")
+            completed += int(r["completed"])
+
+    log.completed_routines = completed
+    log.success_rate = round(completed / log.total_routines, 3)
+    log.status = "SUCCESS" if completed == log.total_routines else ("PARTIAL" if completed > 0 else "ABORTED")
+    db.commit()
+
+    updated = db.query(models.AlarmExecutionRoutine).filter(models.AlarmExecutionRoutine.exec_id == exec_id).all()
+    return {
+        "exec_id": exec_id,
+        "alarm_id": log.alarm_id,
+        "status": log.status,
+        "total_routines": log.total_routines,
+        "completed_routines": log.completed_routines,
+        "success_rate": log.success_rate,
+        "routine_execution_details": [r.__dict__ for r in updated]
+    }
