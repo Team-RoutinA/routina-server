@@ -16,6 +16,17 @@ def get_db():
     finally:
         db.close()
 
+# ✅ 로그인 엔드포인트 (고정된 계정 검증)
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/login")
+def login(req: LoginRequest):
+    if req.email == "test@gmail.com" and req.password == "test":
+        return {"user_id": "test"}
+    raise HTTPException(status_code=401, detail="Invalid credentials")
+
 @app.post("/routines", response_model=schemas.RoutineOut)
 def create_routine(routine: schemas.RoutineCreate, db: Session = Depends(get_db)):
     db_routine = models.Routine(
@@ -107,7 +118,7 @@ def get_dashboard(user_id: str, db: Session = Depends(get_db)):
     }
 @app.put("/routines/{routine_id}", response_model=schemas.RoutineOut)
 def update_routine(routine_id: str, update: schemas.RoutineCreate, db: Session = Depends(get_db)):
-    r = db.query(models.Routine).filter(models.Routine.routine_id == routine_id).first()
+    r = db.query(models.Routine).filter(models.Routine.routine_id == routine_id, models.Routine.user_id == update.user_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Routine not found")
     for key, value in update.dict().items():
@@ -118,17 +129,16 @@ def update_routine(routine_id: str, update: schemas.RoutineCreate, db: Session =
 
 # 루틴 삭제
 @app.delete("/routines/{routine_id}")
-def delete_routine(routine_id: str, db: Session = Depends(get_db)):
-    db.query(models.Routine).filter(models.Routine.routine_id == routine_id).delete()
+def delete_routine(routine_id: str, req: schemas.RoutineDelete, db: Session = Depends(get_db)):
+    db.query(models.Routine).filter(models.Routine.routine_id == routine_id, models.Routine.user_id == req.user_id).delete()
     db.commit()
     return {"message": "Routine deleted"}
 
 # 알람 삭제
 @app.delete("/alarms/{alarm_id}")
-def delete_alarm(alarm_id: str, db: Session = Depends(get_db)):
+def delete_alarm(alarm_id: str, req: schemas.AlarmDelete, db: Session = Depends(get_db)):
     db.query(models.AlarmRoutine).filter(models.AlarmRoutine.alarm_id == alarm_id).delete()
-    db.query(models.AlarmRepeatDay).filter(models.AlarmRepeatDay.alarm_id == alarm_id).delete()
-    db.query(models.Alarm).filter(models.Alarm.alarm_id == alarm_id).delete()
+    db.query(models.Alarm).filter(models.Alarm.alarm_id == alarm_id, models.Alarm.user_id == req.user_id).delete()
     db.commit()
     return {"message": "Alarm deleted"}
 
@@ -262,7 +272,7 @@ def weekly_feedback(user_id: str, db: Session = Depends(get_db)):
 # 알람 수정 + 반복 요일도 함께 수정
 @app.put("/alarms/{alarm_id}")
 def update_alarm(alarm_id: str, update: schemas.AlarmUpdate, db: Session = Depends(get_db)):
-    alarm = db.query(models.Alarm).filter(models.Alarm.alarm_id == alarm_id).first()
+    alarm = db.query(models.Alarm).filter(models.Alarm.alarm_id == alarm_id, models.Alarm.user_id == update.user_id).first()
     if not alarm:
         raise HTTPException(status_code=404, detail="Alarm not found")
     if update.time:
