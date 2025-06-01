@@ -4,6 +4,7 @@ from database import SessionLocal, engine
 import models, schemas
 import uuid
 from typing import List
+from pydantic import BaseModel
 
 models.Base.metadata.create_all(bind=engine)
 
